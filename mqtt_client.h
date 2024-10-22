@@ -2,6 +2,7 @@
 #define MQTT_CLIENT_H
 
 #include "MQTTAsync.h"
+#include <pthread.h>
 
 #define MAX_TOPICS 10
 
@@ -16,6 +17,14 @@ typedef struct {
 } Topic;
 
 typedef struct {
+    int quit;
+    pthread_t thread;
+    int retry;
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
+} ClientReconnect;
+
+typedef struct {
     MQTTAsync client;
     char *name;
     Topic topics[MAX_TOPICS];
@@ -23,6 +32,7 @@ typedef struct {
     int is_connected;
     MQTTAsync_connectionStatusChanged connectionStatusChangedCallback;
     MQTTAsync_messageArrivedTotal totalMessageHandler;
+    ClientReconnect reconnect_handle;
 } MqttClient;
 
 MqttClient* mqttClient_init(const char* serverURI, const char* clientId, MQTTAsync_connectionStatusChanged connectionStatusChangedCallback, MQTTAsync_messageArrivedTotal totalMessageHandler);
