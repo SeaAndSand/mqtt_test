@@ -7,9 +7,6 @@
 #include <time.h>
 #include <errno.h>
 #include <arpa/inet.h>
-#include "slog.h"
-#include "uniq_serial_nums.h"
-#include "system_support.h"
 
 #define KEEPALIVEINTERVAL (10)
 #define HEARTBEAT_TOPIC "heartbeat"
@@ -64,11 +61,11 @@ void* reconnect_thread(void* arg) {
         pthread_mutex_lock(&(mqttClient->reconnect_handle.lock));
 
         while (!mqttClient->reconnect_handle.retry && !mqttClient->reconnect_handle.quit) {
-            slog_info("[%s] [%s] reconnect wait...\n", mqttClient->url, mqttClient->name);
+            printf("[%s] [%s] reconnect wait...\n", mqttClient->url, mqttClient->name);
             pthread_cond_wait(&(mqttClient->reconnect_handle.cond), &(mqttClient->reconnect_handle.lock));
         }
 
-        slog_info("[%s] [%s] reconnect wake...\n", mqttClient->url, mqttClient->name);
+        printf("[%s] [%s] reconnect wake...\n", mqttClient->url, mqttClient->name);
 
         if (mqttClient->reconnect_handle.quit) {
             pthread_mutex_unlock(&(mqttClient->reconnect_handle.lock));
@@ -78,7 +75,7 @@ void* reconnect_thread(void* arg) {
         mqttClient->reconnect_handle.retry = 0;
         pthread_mutex_unlock(&(mqttClient->reconnect_handle.lock));
 
-        slog_info("[%s] [%s] Retrying connection...\n", mqttClient->url, mqttClient->name);
+        printf("[%s] [%s] Retrying connection...\n", mqttClient->url, mqttClient->name);
 
         mqttClient_connect(mqttClient);
     }
@@ -91,7 +88,7 @@ void reconnect_thread_quit(MqttClient *client) {
     client->reconnect_handle.quit = 1;
     pthread_cond_signal(&(client->reconnect_handle.cond));
     pthread_mutex_unlock(&(client->reconnect_handle.lock));
-    join_flexible_thread(client->reconnect_handle.thread);
+    pthread_join(client->reconnect_handle.thread, NULL);
     pthread_mutex_destroy(&(client->reconnect_handle.lock));
     pthread_cond_destroy(&(client->reconnect_handle.cond));
 }
@@ -122,7 +119,7 @@ void* heartbeat_thread(void* arg) {
 
         char data[32] = {0};
         sprintf(data, "%d", client->heartbeat.count);
-        slog_info("[%s] [%s] 发送心跳, heartbeat_count = %d\n", client->url, client->name, client->heartbeat.count);
+        printf("[%s] [%s] 发送心跳, heartbeat_count = %d\n", client->url, client->name, client->heartbeat.count);
         mqttClient_publish(client, client->heartbeat.heartbeat_topic, data, strlen(data), 0, 0);
 
         struct timespec ts_reply;
@@ -154,7 +151,7 @@ void heartbeat_thread_quit(MqttClient *client) {
     client->heartbeat.quit = 1;
     pthread_cond_signal(&(client->heartbeat.cond));
     pthread_mutex_unlock(&(client->heartbeat.lock));
-    join_flexible_thread(client->heartbeat.thread);
+    pthread_join(client->heartbeat.thread, NULL);
     pthread_mutex_destroy(&(client->heartbeat.lock));
     pthread_cond_destroy(&(client->heartbeat.cond));
     free(client->heartbeat.heartbeat_topic);
@@ -170,7 +167,7 @@ void heartbeat_thread_wakeup(MqttClient *client) {
 // 连接丢失回调函数
 void onConnectionLost(void *context, char *cause) {
     MqttClient* client = (MqttClient*)context;
-    slog_info("[%s] [%s] Connection lost: %s\n", client->url, client->name, cause);
+    printf("[%s] [%s] Connection lost: %s\n", client->url, client->name, cause);
     client->isConnected = 0;
 	if (client->connectionStatusChangedCallback) {
 		client->connectionStatusChangedCallback(client, 0);
@@ -182,7 +179,7 @@ void onConnectionLost(void *context, char *cause) {
 
 void onConnectSuccess(void* context, MQTTAsync_successData5* response) {
     MqttClient* client = (MqttClient*)context;
-    slog_info("[%s] [%s] Connected successfully\n", client->url, client->name);
+    printf("[%s] [%s] Connected successfully\n", client->url, client->name);
     client->isConnected = 1;
     if (client->connectionStatusChangedCallback) {
         client->connectionStatusChangedCallback(client, 1);
@@ -211,7 +208,7 @@ void onConnectSuccess(void* context, MQTTAsync_successData5* response) {
 
 void onReConnectSuccess(void* context, char* cause) {
     MqttClient* client = (MqttClient*)context;
-    slog_info("[%s] [%s] ReConnected successfully\n", client->url, client->name);
+    printf("[%s] [%s] ReConnected successfully\n", client->url, client->name);
     client->isConnected = 1;
     if (client->connectionStatusChangedCallback) {
         client->connectionStatusChangedCallback(client, 1);
@@ -240,7 +237,7 @@ void onReConnectSuccess(void* context, char* cause) {
 // 连接失败回调函数
 void onConnectFailure(void* context, MQTTAsync_failureData5* response) {
     MqttClient* client = (MqttClient*)context;
-    slog_info("[%s] [%s] Connect failed, rc %d\n", client->url, client->name, response ? response->code : 0);
+    printf("[%s] [%s] Connect failed, rc %d\n", client->url, client->name, response ? response->code : 0);
     client->isConnected = 0;
     if (client->connectionStatusChangedCallback) {
         client->connectionStatusChangedCallback(client, 0);
@@ -258,7 +255,7 @@ int onMessageArrived(void* context, char* topicName, int topicLen, MQTTAsync_mes
         char data[32] = {0};
         memcpy(data, message->payload, message->payloadlen);
         int received_count = atoi(data);
-        slog_info("[%s] [%s] 收到回复，received_count = %d\n", client->url, client->name, received_count);
+        printf("[%s] [%s] 收到回复，received_count = %d\n", client->url, client->name, received_count);
         if (received_count == client->heartbeat.count) {
             client->heartbeat.count = (client->heartbeat.count % 65535) + 1;
             heartbeat_thread_wakeup(client);
@@ -270,7 +267,7 @@ int onMessageArrived(void* context, char* topicName, int topicLen, MQTTAsync_mes
 
     // 总处理方法
     if (client->totalMessageHandler && client->totalMessageHandler(context, topicName, topicLen, message) < 0) {
-        slog_info("[%s] [%s] Total message handler failed\n", client->url, client->name);
+        printf("[%s] [%s] Total message handler failed\n", client->url, client->name);
         MQTTAsync_freeMessage(&message);
         MQTTAsync_free(topicName);
         return 1;
@@ -282,7 +279,7 @@ int onMessageArrived(void* context, char* topicName, int topicLen, MQTTAsync_mes
                 // 如果启用了控制转发速度，检查时间间隔
                 time_t now = time(NULL);
                 if (now - client->topics[i].lastForwardTime < client->topics[i].interval) {
-                    //slog_info("[%s] [%s] Rate limit exceeded, ignoring message, diff = %d, interval = %d\n", client->url, client->name, now - client->topics[i].lastForwardTime, client->topics[i].interval);
+                    //printf("[%s] [%s] Rate limit exceeded, ignoring message, diff = %d, interval = %d\n", client->url, client->name, now - client->topics[i].lastForwardTime, client->topics[i].interval);
                     MQTTAsync_freeMessage(&message);
                     MQTTAsync_free(topicName);
                     return 1;
@@ -304,19 +301,19 @@ void onSendSuccess(void* context, MQTTAsync_successData5* response) {
 // 发送失败回调函数
 void onSendFailure(void* context, MQTTAsync_failureData5* response) {
     MqttClient *client = (MqttClient *)context;
-    slog_info("[%s] [%s] Failed to send message\n", client->url, client->name);
+    printf("[%s] [%s] Failed to send message\n", client->url, client->name);
 }
 
 void myTraceCallback(enum MQTTASYNC_TRACE_LEVELS level, char* message) {
-    slog_info("Trace[%d]: %s\n", level, message);
+    printf("Trace[%d]: %s\n", level, message);
 }
 
 // 客户端初始化（不包含连接操作）
 MqttClient* mqttClient_init_no_connect(const char* serverURI, const char* clientId, MQTTAsync_connectionStatusChanged connectionStatusChangedCallback, MQTTAsync_messageArrivedTotal totalMessageHandler, void *arrived_message, int enable_heartbeat) {
-    slog_info("serverURI = %s, clientId = %s\n", serverURI, clientId);
+    printf("serverURI = %s, clientId = %s\n", serverURI, clientId);
     MqttClient* client = malloc(sizeof(MqttClient));
     if (client == NULL) {
-        slog_info("Failed to allocate memory for MqttClient\n");
+        printf("Failed to allocate memory for MqttClient\n");
         return NULL;
     }
 
@@ -331,10 +328,10 @@ MqttClient* mqttClient_init_no_connect(const char* serverURI, const char* client
     if (enable_heartbeat) {
         char heartbeat_topic[128];
         memset(heartbeat_topic, 0, sizeof(heartbeat_topic));
-        snprintf(heartbeat_topic, sizeof(heartbeat_topic), "/logger/%s/%s", generate_station_id((char[64]){0}, MODE_DEFAULT), HEARTBEAT_TOPIC);
+        snprintf(heartbeat_topic, sizeof(heartbeat_topic), "/logger/ECU00001/%s", HEARTBEAT_TOPIC);
         client->heartbeat.heartbeat_topic = strdup(heartbeat_topic);
         memset(heartbeat_topic, 0, sizeof(heartbeat_topic));
-        snprintf(heartbeat_topic, sizeof(heartbeat_topic), "/logger/%s/%s", generate_station_id((char[64]){0}, MODE_DEFAULT), HEARTBEAT_REPLY_TOPIC);
+        snprintf(heartbeat_topic, sizeof(heartbeat_topic), "/logger/ECU00001/%s", HEARTBEAT_REPLY_TOPIC);
         client->heartbeat.heartbeat_reply_topic = strdup(heartbeat_topic);
         client->heartbeat.count = 1;
         client->heartbeat.quit = 0;
@@ -348,19 +345,17 @@ MqttClient* mqttClient_init_no_connect(const char* serverURI, const char* client
     pthread_mutex_init(&client->reconnect_handle.lock, NULL);
     pthread_cond_init(&client->reconnect_handle.cond, NULL);
 
-    // pthread_create(&client->reconnect_handle.thread, NULL, reconnect_thread, (void *)client);
-    client->reconnect_handle.thread = create_flexible_thread(reconnect_thread, (void *)client);
+    pthread_create(&client->reconnect_handle.thread, NULL, reconnect_thread, (void *)client);
 
     if (enable_heartbeat) {
-        // pthread_create(&client->heartbeat.thread, NULL, heartbeat_thread, (void *)client);
-        client->heartbeat.thread = create_flexible_thread(heartbeat_thread, (void *)client);
+        pthread_create(&client->heartbeat.thread, NULL, heartbeat_thread, (void *)client);
     }
 
     MQTTAsync_createOptions create_opts = MQTTAsync_createOptions_initializer5;
     create_opts.deleteOldestMessages = 1;
     create_opts.maxBufferedMessages = 1000;
     if (MQTTAsync_createWithOptions(&client->client, serverURI, clientId, MQTTCLIENT_PERSISTENCE_NONE, NULL, &create_opts) != MQTTASYNC_SUCCESS) {
-        slog_info("[%s] [%s] Failed to create MQTTAsync client\n", client->url, client->name);
+        printf("[%s] [%s] Failed to create MQTTAsync client\n", client->url, client->name);
         reconnect_thread_quit(client);
         if (enable_heartbeat) {
             heartbeat_thread_quit(client);
@@ -410,7 +405,7 @@ void mqttClient_deinit(MqttClient* client) {
 
 // 连接到服务器
 void mqttClient_connect(MqttClient* client) {
-    slog_info("[%s] [%s] Connecting to MQTT broker\n", client->url, client->name);
+    printf("[%s] [%s] Connecting to MQTT broker\n", client->url, client->name);
 
     MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer5;
     conn_opts.keepAliveInterval = KEEPALIVEINTERVAL;
@@ -425,20 +420,20 @@ void mqttClient_connect(MqttClient* client) {
     MQTTAsync_setConnected(client->client, client, onReConnectSuccess);
 
     if (MQTTAsync_connect(client->client, &conn_opts) != MQTTASYNC_SUCCESS) {
-        slog_info("[%s] [%s] Failed to connect to MQTT broker\n", client->url, client->name);
+        printf("[%s] [%s] Failed to connect to MQTT broker\n", client->url, client->name);
     }
 }
 
 // 注册主题订阅和消息处理
 void mqttClient_subscribe(MqttClient* client, const char* topic, int qos, MQTTAsync_messageArrived_Handle messageHandler, int interval, int enableRateLimit) {
     if (client->topicCount >= MAX_TOPICS) {
-        slog_info("[%s] [%s] Maximum number of topics reached\n", client->url, client->name);
+        printf("[%s] [%s] Maximum number of topics reached\n", client->url, client->name);
         return;
     }
 
     client->topics[client->topicCount].topic = strdup(topic);
     if (client->topics[client->topicCount].topic == NULL) {
-        slog_info("[%s] [%s] Failed to allocate memory for topic\n", client->url, client->name);
+        printf("[%s] [%s] Failed to allocate memory for topic\n", client->url, client->name);
         return;
     }
 
@@ -460,7 +455,7 @@ void mqttClient_subscribe(MqttClient* client, const char* topic, int qos, MQTTAs
 // 发送
 void mqttClient_publish(MqttClient* client, const char* topic, const char* payload, int payloadlen, int qos, int retained) {
     if (!mqttClient_get_connected_status(client)) {
-        // slog_info("[%s] [%s] Not connected to the broker\n", client->url, client->name);
+        // printf("[%s] [%s] Not connected to the broker\n", client->url, client->name);
         return;
     }
 
@@ -471,13 +466,13 @@ void mqttClient_publish(MqttClient* client, const char* topic, const char* paylo
     pubmsg.payloadlen = payloadlen;
     pubmsg.qos = qos;
     pubmsg.retained = retained;
-    opts.onSuccess5 = onSendSuccess;
+    opts.onSuccess5 = NULL;
     opts.onFailure5 = onSendFailure;
     opts.context = client;
 
     int rc;
     if ((rc = MQTTAsync_sendMessage(client->client, topic, &pubmsg, &opts)) != MQTTASYNC_SUCCESS) {
-        slog_info("[%s] [%s] Failed to send message, rc = %d, %s\n",  client->url, client->name, rc, MQTTAsync_strerror(rc));
+        printf("[%s] [%s] Failed to send message, rc = %d, %s\n",  client->url, client->name, rc, MQTTAsync_strerror(rc));
 	}
 }
 
